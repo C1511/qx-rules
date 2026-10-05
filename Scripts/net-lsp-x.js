@@ -9,6 +9,8 @@
  *     改为同一解析器的 HTTPS 接口 https://223.6.6.6/resolve, 解析结果不变; HTTPS 失败时回退 Cloudflare DoH。
  *  3. 原版用入口 IP 查落地信息时 (默认 http://ip-api.com/json/<入口IP>) 从本机直连发出, 节点 IP 以明文经过国内网络;
  *     改为经所选节点发出。按 IP 查询的结果与请求方无关, 数据不变。
+ *  4. 国内 IP 默认查询源由平安(rmb.pingan.com.cn)改为原脚本内置的 ipip (myip.ipip.net): 平安返回的国内 IP 和位置与实际不符。
+ *     使用原脚本自带的 ipip 解析分支; 入口 IP 查询需要带 IP 参数, 仍用平安, 与原版一致。
  * 保留(未改): 读取所选节点地址用于显示入口信息 (get_server_description; 本副本已审计: 只取服务器地址, 不外传配置);
  *            入口 IP 仍会发给默认国内接口 rmb.pingan.com.cn (HTTPS) 以显示国内视角的入口位置, 与原版一致。
  **/
@@ -30,6 +32,8 @@ $.log(`传入的 $argument: ${$.toStr(arg)}`)
 // }
 
 arg = { ...arg, ...$.getjson(NAME, {}) }
+// [qx-rules] 国内 IP 默认查询源改为 ipip.net (原版默认平安 rmb.pingan.com.cn, 实测 IP 与位置不准); 已有设置时不覆盖
+if (!arg.DOMESTIC_IPv4) arg.DOMESTIC_IPv4 = 'ipip'
 
 $.log(`从持久化存储读取参数后: ${$.toStr(arg)}`)
 

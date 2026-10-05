@@ -33,7 +33,7 @@ https://raw.githubusercontent.com/C1511/qx-rules/main/Filter/dns-guard.list, tag
 | 脚本 | 来源 | 审计结论 / 修改 |
 |---|---|---|
 | `server-info-pure.js` | ddgksf2013（2025-12-14 版） | 只经所选节点向 IPPure（`my.ippure.com/v1/info`，HTTPS）发一次请求，本身比较安全。修改：返回字段写入 HTML 前做转义；先检查 HTTP 状态码。数据和显示与原版一致 |
-| `net-lsp-x.js` | [xream](https://github.com/xream/scripts) | 数据源、默认参数、显示内容与原版一致。修改：① 节点域名原本用明文 `http://223.6.6.6/resolve` 直连解析，改为同一解析器的 HTTPS 接口（失败时回退 Cloudflare DoH）；② 用入口 IP 查落地信息原本从本机明文直连 `http://ip-api.com`，改为经所选节点发出；③ 去掉 pingan / speedtest.cn 域名的变量拼接 |
+| `net-lsp-x.js` | [xream](https://github.com/xream/scripts) | 显示格式与原版一致。修改：① 节点域名原本用明文 `http://223.6.6.6/resolve` 直连解析，改为同一解析器的 HTTPS 接口（失败时回退 Cloudflare DoH）；② 用入口 IP 查落地信息原本从本机明文直连 `http://ip-api.com`，改为经所选节点发出；③ 去掉 pingan / speedtest.cn 域名的变量拼接；④ 国内 IP 默认查询源由平安改为原脚本内置的 ipip.net（平安返回的 IP 和位置不准） |
 | `IP-API.js` | [I-am-R-E](https://github.com/I-am-R-E/Functional-Store-Hub) v1.3 | 原版为混淆代码。逐函数还原为可读代码，12 组输入与原版逐字一致；不发任何网络请求 |
 | `streaming-ui-check.js` | [KOP-XIAO](https://github.com/KOP-XIAO/QuantumultX) | 请求均经所选节点发往流媒体官方域名。修复：Disney 第二个请求漏了 `policy`，会按分流走、可能直连 |
 | `geo_location.js` | [KOP-XIAO](https://github.com/KOP-XIAO/QuantumultX) | 只经所选节点请求 `https://api.ip.sb/geoip`，未改动 |
