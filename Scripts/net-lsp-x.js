@@ -1,22 +1,16 @@
 /***
- * [C1511/qx-rules 审计+加固副本]
+ * [C1511/qx-rules 审计+加固副本] network-info (net-lsp-x)  v2
  * 来源: https://raw.githubusercontent.com/xream/scripts/main/surge/modules/network-info/net-lsp-x.js
- * 原文件 sha256: efcedfe72a613b314609f2ed82ea716d821d5c1d7db15012fe4ead218b3fc5a4 (2026-10-05 下载)
+ * 原文件 sha256: efcedfe72a613b314609f2ed82ea716d821d5c1d7db15012fe4ead218b3fc5a4 (2026-10-05)
  *
- * 原版问题:
- *  1. QX 下通过 $configuration.sendMessage(get_server_description) 读取所选节点完整配置(含密码/UUID),
- *     提取服务器地址作为「入口 IP」。
- *  2. 节点为域名时, 默认用明文 http://223.6.6.6/resolve (阿里) 直连解析节点域名。
- *  3. 入口与落地不一致时, 把入口 IP 直连发给 rmb.pingan.com.cn, 并明文发给 ip-api.com。
- *  4. pingan / speedtest.cn 两个域名被拆成变量拼接, 不利于审计。
- *  5. 落地查询默认使用明文 http://ip-api.com。
- *
- * 本地修改: 删除第 1 条(因此第 2、3 条在 QX 下不再触发); 域名解析默认改 Cloudflare DoH;
- *          去混淆为明文域名; 落地查询默认改为 https://api-ipv4.ip.sb。
- * 保留行为: 「直连 IP」查询走分流规则 (默认 rmb.pingan.com.cn, HTTPS), 用于显示你的国内出口 IP;
- *          「落地 IP」查询走所选节点。
- * [task_local]
- * event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/net-lsp-x.js, tag=网络信息查询, img-url=link.circle.system, enabled=true
+ * 原则: 以原版为准, 只做不改变查询结果的安全修改 (数据源、默认参数、显示内容均与原版一致)。
+ *  1. 去混淆: pingan / speedtest.cn 两个域名原本被拆成变量拼接, 改为明文, 行为不变。
+ *  2. 入口为域名时, 原版用明文 http://223.6.6.6/resolve (阿里) 直连解析节点域名, 节点域名以明文经过国内网络;
+ *     改为同一解析器的 HTTPS 接口 https://223.6.6.6/resolve, 解析结果不变; HTTPS 失败时回退 Cloudflare DoH。
+ *  3. 原版用入口 IP 查落地信息时 (默认 http://ip-api.com/json/<入口IP>) 从本机直连发出, 节点 IP 以明文经过国内网络;
+ *     改为经所选节点发出。按 IP 查询的结果与请求方无关, 数据不变。
+ * 保留(未改): 读取所选节点地址用于显示入口信息 (get_server_description; 本副本已审计: 只取服务器地址, 不外传配置);
+ *            入口 IP 仍会发给默认国内接口 rmb.pingan.com.cn (HTTPS) 以显示国内视角的入口位置, 与原版一致。
  **/
 
 const NAME = 'network-info'
@@ -36,8 +30,6 @@ $.log(`传入的 $argument: ${$.toStr(arg)}`)
 // }
 
 arg = { ...arg, ...$.getjson(NAME, {}) }
-// [qx-rules] 落地查询默认走 HTTPS
-if (!arg.LANDING_IPv4) arg.LANDING_IPv4 = 'ipsb'
 
 $.log(`从持久化存储读取参数后: ${$.toStr(arg)}`)
 
@@ -318,8 +310,14 @@ async function getEntranceInfo() {
   if (isInteraction()) {
     try {
       if ($.isQuanX()) {
-        // [qx-rules] 已移除 get_server_description: 不读取节点配置(含凭据), 不查询入口 IP
-        POLICY = $environment.params
+        const nodeName = $environment.params
+        const { ret, error } = await $configuration.sendMessage({ action: 'get_server_description', content: nodeName })
+        if (error) throw new Error(error)
+        // $.log(JSON.stringify(ret, null, 2))
+        const proxy = Object.values(ret)[0]
+        // $.log(proxy)
+        IP = proxy.match(/.+?\s*?=\s*?(.+?):\d+\s*?,.+/)[1]
+        POLICY = nodeName
       } else if ($.isLoon()) {
         IP = $.lodash_get($environment, 'params.nodeInfo.address')
         POLICY = $.lodash_get($environment, 'params.node')
@@ -900,7 +898,7 @@ async function getProxyInfo(ip, provider) {
         $.log(`随机使用 ipinfo 的 token: ${token}`)
       }
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
         url: ip
           ? `https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(token)}`
           : `https://ipinfo.io/json?token=${encodeURIComponent(token)}`,
@@ -928,7 +926,7 @@ async function getProxyInfo(ip, provider) {
   } else if (provider == 'ipsb') {
     try {
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `https://api-ipv4.ip.sb/geoip${ip ? `/${encodeURIComponent(ip)}` : ''}`,
         headers: {
@@ -967,7 +965,7 @@ async function getProxyInfo(ip, provider) {
   } else if (provider == 'ipwhois') {
     try {
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `https://ipwho.is${ip ? `/${encodeURIComponent(ip)}` : ''}`,
         headers: {
@@ -1011,7 +1009,7 @@ async function getProxyInfo(ip, provider) {
   } else if (provider == 'ipapiis') {
     try {
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `https://api.ipapi.is`,
         params: { q: ip },
@@ -1064,7 +1062,7 @@ async function getProxyInfo(ip, provider) {
     try {
       const p = ip ? `/${encodeURIComponent(ip)}` : ''
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `http://ip-api.com/json${p}?lang=zh-CN`,
         headers: {
@@ -1109,7 +1107,7 @@ async function getProxyInfoIPv6(ip) {
   if ($.lodash_get(arg, 'LANDING_IPv6') == 'ident') {
     try {
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `https://v6.ident.me`,
         headers: {
@@ -1125,7 +1123,7 @@ async function getProxyInfoIPv6(ip) {
   } else if ($.lodash_get(arg, 'LANDING_IPv6') == 'ipify') {
     try {
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `https://api6.ipify.org`,
         headers: {
@@ -1141,7 +1139,7 @@ async function getProxyInfoIPv6(ip) {
   } else {
     try {
       const res = await http({
-        ...(ip ? {} : getNodeOpt()),
+        ...getNodeOpt(),
 
         url: `https://api-ipv6.ip.sb/ip`,
         headers: {
@@ -1397,8 +1395,18 @@ const DOMAIN_RESOLVERS = {
     return answers[answers.length - 1].data
   },
   ali: async function (domain, type) {
+    try {
+      return await DOMAIN_RESOLVERS.aliHttps(domain, type)
+    } catch (e) {
+      // 仅在 HTTPS 请求本身失败时回退; 「无结果」是正常解析结果, 直接返回
+      if (e && e.message === '域名解析无结果') throw e
+      $.log(`[qx-rules] 阿里 DoH(HTTPS) 请求失败, 回退 Cloudflare DoH: ${e.message || e}`)
+      return await DOMAIN_RESOLVERS.cf(domain, type)
+    }
+  },
+  aliHttps: async function (domain, type) {
     const resp = await http({
-      url: `http://223.6.6.6/resolve`,
+      url: `https://223.6.6.6/resolve`,
       params: {
         edns_client_subnet: '223.6.6.6/24',
         name: domain,
@@ -1474,11 +1482,11 @@ async function resolveDomain(domain) {
     if ($.isLoon() && !resolverName && typeof $dns !== 'undefined' && typeof $dns?.query === 'function') {
       return await resolveDomainLoon(domain)
     } else {
-      resolverName = $.lodash_get(arg, 'DNS') || 'cf'
+      resolverName = $.lodash_get(arg, 'DNS') || 'ali'
     }
     let resolver = DOMAIN_RESOLVERS[resolverName]
     if (!resolver) {
-      resolverName = 'cf'
+      resolverName = 'ali'
       resolver = DOMAIN_RESOLVERS[resolverName]
     }
     const msg = `使用 ${resolverName} 解析域名 ${domain}`

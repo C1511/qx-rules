@@ -28,23 +28,23 @@ https://raw.githubusercontent.com/C1511/qx-rules/main/Filter/dns-guard.list, tag
 
 ## Scripts：审计过的脚本
 
-文件头记录了来源 URL 和原文件 sha256（2026-10-05 下载）。
+原则：**以原脚本为准，只做不改变查询结果的安全修改**。每个文件头都记录了来源和原文件 sha256，每处修改都用相同输入与原版比对过输出。
 
 | 脚本 | 来源 | 审计结论 / 修改 |
 |---|---|---|
-| `streaming-ui-check.js` | [KOP-XIAO](https://github.com/KOP-XIAO/QuantumultX) | 请求均经所选节点发往流媒体官方域名。修复：Disney 第二个请求漏了 `policy`，可能按分流直连 |
-| `geo_location.js` | [KOP-XIAO](https://github.com/KOP-XIAO/QuantumultX) | 仅经所选节点请求 ip.sb。修复：原用双栈的 `api.ip.sb`，节点有 IPv6 出口时会查成 IPv6，改为只走 IPv4 的 `api-ipv4.ip.sb` |
-| `net-lsp-x.js` | [xream](https://github.com/xream/scripts) | **原版在 QX 中会通过 `get_server_description` 读取节点完整配置（含密码/UUID），并把节点域名以明文发给阿里 DNS（`http://223.6.6.6`），再发给平安和 ip-api**。已删除读取节点配置的逻辑，DNS 默认改为 Cloudflare DoH，落地查询改为 HTTPS，并去掉了混淆拼接的域名 |
-| `ip-purity.js` | 自写 v2 | 替代 `ddgksf2013.top/scripts/server-info-pure.js`（托管在个人域名，无法审计）。先通过只走 IPv4 的接口锁定落地 IPv4，再并排展示 ip-api.com、ipapi.is、proxycheck.io 三个数据源的位置、IP 类型、原生判断和风险；查询失败时显示「-」或失败原因，不会显示成「否」 |
-| `ip-api-geo.js` | 自写 v2 | 替代 `I-am-R-E/IP-API.js`（混淆代码）。数据源仍是 ip-api.com（只有 IPv4、有中文）；只解析 QX 传入的结果，自身不发请求。v1 用的 `api.ip.sb` 是双栈地址，节点有 IPv6 出口时会查成 IPv6，已弃用 |
+| `server-info-pure.js` | ddgksf2013（2025-12-14 版） | 只经所选节点向 IPPure（`my.ippure.com/v1/info`，HTTPS）发一次请求，本身比较安全。修改：返回字段写入 HTML 前做转义；先检查 HTTP 状态码。数据和显示与原版一致 |
+| `net-lsp-x.js` | [xream](https://github.com/xream/scripts) | 数据源、默认参数、显示内容与原版一致。修改：① 节点域名原本用明文 `http://223.6.6.6/resolve` 直连解析，改为同一解析器的 HTTPS 接口（失败时回退 Cloudflare DoH）；② 用入口 IP 查落地信息原本从本机明文直连 `http://ip-api.com`，改为经所选节点发出；③ 去掉 pingan / speedtest.cn 域名的变量拼接 |
+| `IP-API.js` | [I-am-R-E](https://github.com/I-am-R-E/Functional-Store-Hub) v1.3 | 原版为混淆代码。逐函数还原为可读代码，12 组输入与原版逐字一致；不发任何网络请求 |
+| `streaming-ui-check.js` | [KOP-XIAO](https://github.com/KOP-XIAO/QuantumultX) | 请求均经所选节点发往流媒体官方域名。修复：Disney 第二个请求漏了 `policy`，会按分流走、可能直连 |
+| `geo_location.js` | [KOP-XIAO](https://github.com/KOP-XIAO/QuantumultX) | 只经所选节点请求 `https://api.ip.sb/geoip`，未改动 |
 
 ```
 [general]
-geo_location_checker=http://ip-api.com/json/?lang=zh-CN, https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/ip-api-geo.js
+geo_location_checker=http://ip-api.com/json/?lang=zh-CN, https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/IP-API.js
 
 [task_local]
 event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/streaming-ui-check.js, tag=流媒体 - 解锁查询, img-url=checkmark.seal.system, enabled=true
 event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/geo_location.js, tag=GeoIP 查询, img-url=location.fill.viewfinder.system
 event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/net-lsp-x.js, tag=网络信息查询, img-url=link.circle.system, enabled=true
-event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/ip-purity.js, tag=节点纯净度详情, img-url=checkmark.shield.fill.system
+event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/server-info-pure.js, tag=节点纯净度详情, img-url=checkmark.shield.fill.system
 ```

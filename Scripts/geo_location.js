@@ -2,8 +2,7 @@
  * [C1511/qx-rules 审计副本]
  * 来源: https://raw.githubusercontent.com/KOP-XIAO/QuantumultX/master/Scripts/geo_location.js
  * 原文件 sha256: d76b2888019a257c321405839637965ccf33f796b93a05f5a7b697bd3f7e1000 (2026-10-05 下载)
- * 审计结论: 仅通过所选节点请求 ip.sb geoip; 无其它网络请求、无持久化存储读写。
- * 本地修改: api.ip.sb 是双栈地址, 节点有 IPv6 出口时会查成 IPv6 及其(往往不准的)定位, 改为仅 IPv4 的 api-ipv4.ip.sb。
+ * 审计结论: 仅通过所选节点请求 https://api.ip.sb/geoip; 无其它网络请求、无持久化存储读写。未做修改。
  * [task_local]
  * event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/geo_location.js, tag=GeoIP 查询, img-url=location.fill.viewfinder.system
  **/
@@ -18,7 +17,7 @@
 
 // var content= `<p style="text-align: center; font-family: -apple-system; font-size: large; font-weight: bold">` + response.body + `</p>`;
 
-  var url = "https://api-ipv4.ip.sb/geoip"
+  var url = "https://api.ip.sb/geoip"
   var opts = {
       policy: $environment.params
   };
