@@ -1,0 +1,10 @@
+# DNS 防泄漏 (Quantumult X 分流资源)
+# [filter_remote] 引用 (必须排在所有域名类列表之后, 不要加 force-policy):
+# https://raw.githubusercontent.com/C1511/qx-rules/main/Filter/dns-guard.list, tag=DNS 防泄漏, update-interval=172800, opt-parser=false, enabled=true
+#
+# 作用: 前面所有域名规则都没命中的域名, 直接交给「🕹 兜底策略」, 不再为了匹配 geoip / ip-cidr / ChinaIPs 而在本地解析。
+#       兜底策略选节点时, 域名由节点远程解析, 阿里 DNS 看不到你访问了哪些境外网站。
+#       纯 IP 请求不会被 host 类规则匹配, 仍由后面的 IP 类规则处理 (官方 sample.conf 推荐写法)。
+# 前提: 「其他设置 → 分流匹配优化」开启 (QX 默认开启)。
+# 代价: 不在 China.list 里的国内小众域名也会走兜底策略; 遇到异常可在该域名加 direct 规则, 或在 UI 中临时关闭本资源。
+host-keyword, ., 🕹 兜底策略
