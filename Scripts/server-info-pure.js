@@ -7,6 +7,7 @@
  * 本地修改 (不改变数据源和显示内容):
  *  1. API 返回的字段写入 HTML 前做转义, 防止返回内容注入页面。
  *  2. 先检查 HTTP 状态码, 非 200 时提示「HTTP xxx」, 不再尝试解析错误页。
+ *  3. 新增「IP 来源」一行: 取同一接口返回的 isBroadcast (广播 IP / 原生 IP), 字段缺失时显示「-」。
  *
  * [task_local]
  * event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/server-info-pure.js, tag=节点纯净度详情, img-url=checkmark.shield.fill.system
@@ -69,6 +70,8 @@ function generateHtmlMessage(data) {
     if (data.city) location += ` - ${esc(data.city)}`;
 
     const typeStr = data.isResidential ? "住宅网络 🏠" : "数据中心 🏢";
+    // [qx-rules] IP 来源: IPPure /v1/info 文档字段 isBroadcast; 非布尔值时显示 "-"
+    const sourceStr = data.isBroadcast === true ? "广播 IP 📡" : data.isBroadcast === false ? "原生 IP ✅" : "-";
     
     const score = data.fraudScore || 0;
     const riskInfo = getRiskLevel(score);
@@ -79,6 +82,7 @@ function generateHtmlMessage(data) {
         ["ASN", asn],
         ["位置", location],
         ["类型", typeStr],
+        ["IP 来源", sourceStr],
         ["欺诈值", `${esc(score)} 分`],
         ["风险等级", riskInfo]
     ];
