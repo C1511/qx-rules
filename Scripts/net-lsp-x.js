@@ -11,7 +11,8 @@
  *     改为经所选节点发出。按 IP 查询的结果与请求方无关, 数据不变。
  *  4. 国内 IP 默认查询源由平安(rmb.pingan.com.cn)改为新增的 baidu: 平安返回的 IP 和位置与实际不符; 用户网络有多个出口,
  *     ipip.net 看到的 IP 与百度不同。现以百度 https://qifu.baidu.com/api/v1/ip-portrait/brief-info/local 为准
- *     (data.query_ip / province / city / isp), 百度失败时退回原脚本内置的 ipip.net。
+ *     (data.query_ip / province / city / isp), 请求模拟 Safari 请求头, 首次失败时先取百度 Cookie 再重试一次;
+ *     仍失败时退回原脚本内置的 ipip.net, 并在结果中显示百度的失败原因。
  *     两个接口都按分流规则直连 (baidu.com / ipip.net 均在 China.list)。入口 IP 查询仍用平安, 与原版一致。
  * 保留(未改): 读取所选节点地址用于显示入口信息 (get_server_description; 本副本已审计: 只取服务器地址, 不外传配置);
  *            入口 IP 仍会发给默认国内接口 rmb.pingan.com.cn (HTTPS) 以显示国内视角的入口位置, 与原版一致。
@@ -485,23 +486,10 @@ async function getDirectInfo(ip, provider) {
       $.logErr(`${msg} 发生错误: ${e.message || e}`)
     }
   } else if (!ip && provider == 'baidu') {
-    // [qx-rules] 本机国内 IP 以百度为准 (与百度搜索「ip」同源), 百度失败时退回 ipip.net
+    // [qx-rules] 本机国内 IP 以百度为准 (与百度搜索「ip」同源), 百度失败时退回 ipip.net 并显示失败原因
     // 返回格式: { code: 200, data: { query_ip, country, province, city, isp, ... } }
-    const UA =
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
     try {
-      const res = await http({
-        url: `https://qifu.baidu.com/api/v1/ip-portrait/brief-info/local?`,
-        headers: { 'User-Agent': UA },
-      })
-      let body = String($.lodash_get(res, 'body'))
-      try {
-        body = JSON.parse(body)
-      } catch (e) {}
-      const data = $.lodash_get(body, 'data') || {}
-      if ($.lodash_get(body, 'code') != 200 || !data.query_ip) {
-        throw new Error($.lodash_get(body, 'message') || '百度未返回 IP')
-      }
+      const data = await baiduLocalIP()
       isCN = data.country === '中国'
       CN_IP = data.query_ip
       CN_INFO = [
@@ -513,8 +501,12 @@ async function getDirectInfo(ip, provider) {
         .filter(i => i)
         .join('\n')
     } catch (e) {
-      $.logErr(`百度查询失败, 改用 ipip.net: ${e.message || e}`)
-      return await getDirectInfo(undefined, 'ipip')
+      const reason = `${e.message || e}`
+      $.logErr(`百度查询失败, 改用 ipip.net: ${reason}`)
+      const fallback = await getDirectInfo(undefined, 'ipip')
+      CN_IP = fallback.CN_IP
+      isCN = fallback.isCN
+      CN_INFO = [fallback.CN_INFO, `百度: 查询失败 (${reason}), 以上为 ipip.net 结果`].filter(i => i).join('\n')
     }
   } else if (!ip && provider == 'ipip') {
     try {
@@ -871,6 +863,69 @@ async function getDirectInfo(ip, provider) {
     }
   }
   return { CN_IP, CN_INFO: simplifyAddr(CN_INFO), isCN }
+}
+// [qx-rules] 百度本机 IP 查询: 模拟浏览器请求头; 首次失败时先取百度 Cookie 再重试一次
+const BAIDU_LOCAL_URL = 'https://qifu.baidu.com/api/v1/ip-portrait/brief-info/local?'
+const SAFARI_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+function extractCookie(headers) {
+  if (!headers) return ''
+  const key = Object.keys(headers).find(k => k.toLowerCase() === 'set-cookie')
+  if (!key) return ''
+  const raw = [].concat(headers[key]).join(', ')
+  const attrs = ['expires', 'path', 'domain', 'max-age', 'samesite', 'secure', 'httponly', 'version', 'comment']
+  const pairs = []
+  const re = /(?:^|,\s*)([A-Za-z0-9_\-]+)=([^;,\s]*)/g
+  let m
+  while ((m = re.exec(raw))) {
+    if (!attrs.includes(m[1].toLowerCase())) pairs.push(`${m[1]}=${m[2]}`)
+  }
+  return pairs.join('; ')
+}
+async function baiduLocalIP() {
+  const headers = {
+    'User-Agent': SAFARI_UA,
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh-Hans;q=0.9',
+    Referer: 'https://qifu.baidu.com/',
+  }
+  const query = async cookie => {
+    const res = await http({ url: BAIDU_LOCAL_URL, headers: cookie ? { ...headers, Cookie: cookie } : { ...headers } })
+    if (!res) throw new Error('请求超时')
+    const status = $.lodash_get(res, 'statusCode') || $.lodash_get(res, 'status')
+    const raw = String($.lodash_get(res, 'body') || '')
+    $.log(`百度返回 HTTP ${status}${cookie ? ' (带 Cookie)' : ''}: ${raw.slice(0, 300)}`)
+    let body
+    try {
+      body = JSON.parse(raw)
+    } catch (e) {
+      throw new Error(`HTTP ${status}, 返回不是 JSON`)
+    }
+    const data = $.lodash_get(body, 'data') || {}
+    if ($.lodash_get(body, 'code') != 200 || !data.query_ip) {
+      throw new Error(`HTTP ${status} / 返回码 ${$.lodash_get(body, 'code')}: ${$.lodash_get(body, 'message') || $.lodash_get(body, 'error') || '无 IP'}`)
+    }
+    return data
+  }
+  try {
+    return await query()
+  } catch (e1) {
+    // 超时不是 Cookie 能解决的, 直接失败
+    if (e1 && e1.message === '请求超时') throw e1
+    $.log(`百度首次查询失败: ${e1.message || e1}, 获取百度 Cookie 后重试`)
+    let cookie = ''
+    for (const url of ['https://qifu.baidu.com/', 'https://www.baidu.com/']) {
+      const res = await http({ url, headers: { 'User-Agent': SAFARI_UA } })
+      cookie = extractCookie($.lodash_get(res, 'headers'))
+      if (cookie) break
+    }
+    if (!cookie) throw new Error(`${e1.message || e1}; 未能取得百度 Cookie`)
+    try {
+      return await query(cookie)
+    } catch (e2) {
+      throw new Error(`${e2.message || e2} (已带 Cookie 重试)`)
+    }
+  }
 }
 async function getDirectInfoIPv6() {
   let CN_IPv6
