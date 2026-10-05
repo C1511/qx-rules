@@ -9,8 +9,10 @@
  *     改为同一解析器的 HTTPS 接口 https://223.6.6.6/resolve, 解析结果不变; HTTPS 失败时回退 Cloudflare DoH。
  *  3. 原版用入口 IP 查落地信息时 (默认 http://ip-api.com/json/<入口IP>) 从本机直连发出, 节点 IP 以明文经过国内网络;
  *     改为经所选节点发出。按 IP 查询的结果与请求方无关, 数据不变。
- *  4. 国内 IP 默认查询源由平安(rmb.pingan.com.cn)改为原脚本内置的 ipip (myip.ipip.net): 平安返回的国内 IP 和位置与实际不符。
- *     使用原脚本自带的 ipip 解析分支; 入口 IP 查询需要带 IP 参数, 仍用平安, 与原版一致。
+ *  4. 国内 IP 默认查询源由平安(rmb.pingan.com.cn)改为新增的 baidu: 平安返回的 IP 和位置与实际不符; ipip.net 位置正确,
+ *     但用户网络有多个出口, ipip 看到的 IP 与百度不同。现以百度 https://qifu.baidu.com/api/v1/ip-portrait/brief-info/local
+ *     看到的 IP 为准; 位置优先用百度返回的字段, 识别不到时用 ipip.net 的位置; 百度失败时整体退回 ipip.net。
+ *     两个请求都按分流规则直连 (baidu.com / ipip.net 均在 China.list)。入口 IP 查询仍用平安, 与原版一致。
  * 保留(未改): 读取所选节点地址用于显示入口信息 (get_server_description; 本副本已审计: 只取服务器地址, 不外传配置);
  *            入口 IP 仍会发给默认国内接口 rmb.pingan.com.cn (HTTPS) 以显示国内视角的入口位置, 与原版一致。
  **/
@@ -32,8 +34,8 @@ $.log(`传入的 $argument: ${$.toStr(arg)}`)
 // }
 
 arg = { ...arg, ...$.getjson(NAME, {}) }
-// [qx-rules] 国内 IP 默认查询源改为 ipip.net (原版默认平安 rmb.pingan.com.cn, 实测 IP 与位置不准); 已有设置时不覆盖
-if (!arg.DOMESTIC_IPv4) arg.DOMESTIC_IPv4 = 'ipip'
+// [qx-rules] 国内 IP 默认以百度为准 (原版默认平安 rmb.pingan.com.cn, 实测 IP 与位置不准); 已有设置时不覆盖
+if (!arg.DOMESTIC_IPv4) arg.DOMESTIC_IPv4 = 'baidu'
 
 $.log(`从持久化存储读取参数后: ${$.toStr(arg)}`)
 
@@ -481,6 +483,88 @@ async function getDirectInfo(ip, provider) {
         .join('\n')
     } catch (e) {
       $.logErr(`${msg} 发生错误: ${e.message || e}`)
+    }
+  } else if (!ip && provider == 'baidu') {
+    // [qx-rules] 本机国内 IP 以百度为准 (与百度搜索「ip」同源): https://qifu.baidu.com/api/v1/ip-portrait/brief-info/local
+    // IP 取百度返回内容; 位置/运营商优先用百度返回的字段, 识别不到时用 ipip.net 的位置; 百度失败时整体退回 ipip.net
+    const UA =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0'
+    const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/
+    // 在任意层级查找字段 (键名不区分大小写)
+    const findKey = (obj, names) => {
+      if (!obj || typeof obj !== 'object') return undefined
+      for (const k of Object.keys(obj)) {
+        if (names.includes(k.toLowerCase()) && obj[k] !== null && typeof obj[k] !== 'object' && String(obj[k]).trim()) return String(obj[k]).trim()
+      }
+      for (const k of Object.keys(obj)) {
+        const v = findKey(obj[k], names)
+        if (v !== undefined) return v
+      }
+      return undefined
+    }
+    let ipipIP, ipipInfo, ipipCN
+    try {
+      const res = await http({ url: `https://myip.ipip.net/json`, headers: { 'User-Agent': UA } })
+      let body = String($.lodash_get(res, 'body'))
+      try {
+        body = JSON.parse(body)
+      } catch (e) {}
+      ipipIP = $.lodash_get(body, 'data.ip')
+      ipipCN = $.lodash_get(body, 'data.location.0') === '中国'
+      ipipInfo = [
+        [
+          '位置:',
+          ipipCN ? getflag('CN') : undefined,
+          $.lodash_get(body, 'data.location.0'),
+          $.lodash_get(body, 'data.location.1'),
+          $.lodash_get(body, 'data.location.2'),
+        ]
+          .filter(i => i)
+          .join(' '),
+        ['运营商:', $.lodash_get(body, 'data.location.4')].filter(i => i).join(' '),
+      ]
+        .filter(i => i)
+        .join('\n')
+    } catch (e) {
+      $.logErr(`ipip.net 查询失败: ${e.message || e}`)
+    }
+    try {
+      const res = await http({
+        url: `https://qifu.baidu.com/api/v1/ip-portrait/brief-info/local?`,
+        headers: { 'User-Agent': UA, Referer: 'https://qifu.baidu.com/' },
+      })
+      const raw = String($.lodash_get(res, 'body'))
+      $.log(`百度 ip-portrait 返回: ${raw}`)
+      let body
+      try {
+        body = JSON.parse(raw)
+      } catch (e) {
+        throw new Error('百度返回内容不是 JSON')
+      }
+      const bdIP = findKey(body, ['ip']) || (raw.match(IPV4_RE) || [])[0]
+      if (!bdIP) throw new Error('百度返回中没有 IP')
+      CN_IP = bdIP
+      const country = findKey(body, ['country'])
+      const prov = findKey(body, ['prov', 'province'])
+      const city = findKey(body, ['city'])
+      const district = findKey(body, ['district'])
+      const isp = findKey(body, ['isp', 'owner', 'operator'])
+      isCN = country ? /中国|^CN$/i.test(country) : ipipCN
+      if (prov || city) {
+        CN_INFO = [
+          ['位置:', isCN ? getflag('CN') : undefined, country, prov, city, district].filter(i => i).join(' '),
+          ['运营商:', isp].filter(i => i).join(' '),
+        ]
+          .filter(i => i)
+          .join('\n')
+      } else {
+        CN_INFO = ipipInfo
+      }
+    } catch (e) {
+      $.logErr(`百度查询失败, 使用 ipip.net 结果: ${e.message || e}`)
+      CN_IP = ipipIP
+      CN_INFO = ipipInfo
+      isCN = ipipCN
     }
   } else if (!ip && provider == 'ipip') {
     try {
