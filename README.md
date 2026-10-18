@@ -48,3 +48,29 @@ event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/
 event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/net-lsp-x.js, tag=网络信息查询, img-url=link.circle.system, enabled=true
 event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/server-info-pure.js, tag=节点纯净度详情, img-url=checkmark.shield.fill.system
 ```
+
+## WhereAmI.conf：时区 / 定位跟随出口
+
+改自 Greasy Fork [#600207 Where Am I — Follow Proxy IP](https://greasyfork.org/scripts/600207)（Z健C，v6.6.6，**CC BY-NC-SA 4.0**，本改编沿用同一协议，不可商用）。与上面「只做安全修改」的脚本不同，这是**移植改写**：页面补丁逻辑沿用原版，取数方式改为 QX 实现。
+
+- 注入的补丁覆盖 Geolocation / Permissions、`Intl.DateTimeFormat`、`Date`（getter / setter / toString / 构造器），可选 WebRTC 候选过滤、语言对齐
+- 出口 IP 与归属地由 QX 经 `$task.fetch` 查询（ipify → ipwho.is / freeipapi / ipinfo / ipapi.co 投票），**页面内不发任何请求**；注入的 `<script>` 执行后自删
+- 出口 IP 每 60 秒复检，归属地按 IP 缓存 6 小时；切节点后可手动跑一次 task 立即刷新
+- CSP：页面有 nonce 就复用，否则只在本就禁止内联脚本的策略里追加 nonce，不放宽页面自身限制
+- 跳过：国内站点列表 / `.cn`、非 HTML、非 UTF-8、fetch/XHR 拿回的 HTML 片段
+- 配置：改 `Scripts/where-am-i.js` 顶部 `DEFAULTS`，或在 QX 持久化写 `wai_config`（JSON，只写要改的字段）。`langMode` 设为 `match` / `en` 时，同时启用 conf 里注释掉的 `script-request-header` 那行，让 `Accept-Language` 与 JS 一致
+- ⚠ 只有 `hostname` 里的站点会生效；MitM 对所有 App 生效，带证书锁定的 App 会连不上。Safari 走 QUIC 会绕过 MitM，需要时丢弃 UDP 443
+
+```
+[rewrite_remote]
+https://raw.githubusercontent.com/C1511/qx-rules/main/WhereAmI.conf, tag=Where Am I, update-interval=172800, opt-parser=false, enabled=true
+
+[task_local]
+event-interaction https://raw.githubusercontent.com/C1511/qx-rules/main/Scripts/where-am-i.js, tag=Where Am I · 刷新出口, img-url=location.circle.system, enabled=true
+```
+
+### FlClash/where-am-i.js
+
+mihomo 内核没有 MitM，FlClash 无法改网页，浏览器里仍用原版油猴脚本。这个覆写脚本（FlClash ≥ 0.8.85）只做分流配合：油猴脚本查出口用的接口固定走 `MATCH` 的策略组（保证它查到的 = 网站看到的），直连探针 `myip.ipip.net` / `4.ipw.cn` 固定 DIRECT。WebRTC：开 TUN 时 STUN 也进隧道；只开系统代理仍需 WebRTC Network Limiter 扩展。
+
+安装：工具 → 进阶配置 → 脚本 → 添加，粘贴 `FlClash/where-am-i.js`；再在订阅的「覆写 → 脚本」里选中。
